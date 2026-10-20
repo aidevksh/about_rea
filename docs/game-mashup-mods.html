@@ -1,0 +1,802 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>게임 매시업 모드 해부</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="엘든링×오버워치, 사이버펑크×마인크래프트 같은 게임 섞기 모드가 에셋 이식, 두 게임 동시 실행(패스스루), AI 생성 영상 중 무엇인지와 각각의 구현 방식을 흐름도로 정리한 리서치 문서">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: REA 분석 문서와 같은 문서형 한 줄기. 본문 46rem, 도식·표는 1120px까지.
+   색은 역할을 뜻한다: 파랑 = 게임 A(호스트), 초록 = 게임 B(게임플레이), 호박 = 두 게임 사이를 오가는 데이터,
+   보라 = AI 에이전트, 회색 = 도구·파일, 빨강 = 위험·확인 불가 */
+:root{
+  --paper:#f2f4f7;
+  --sheet:#ffffff;
+  --ink:#17202c;
+  --ink-2:#4e5b6c;
+  --rule:#d3d9e1;
+  --wash:#e8ecf1;
+  --a:#2d53c2;
+  --a-wash:#e3e9fa;
+  --b:#08735a;
+  --b-wash:#dcf1e8;
+  --ch:#9a5600;
+  --ch-wash:#faecd6;
+  --ag:#7a3fb0;
+  --ag-wash:#f1e8fa;
+  --eng:#596372;
+  --eng-wash:#e9ecf0;
+  --unk:#b0361f;
+  --unk-wash:#f9e1dc;
+  --f-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono","IBM Plex Sans KR",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0e131a; --sheet:#151c25; --ink:#e0e6ee; --ink-2:#9ba7b6; --rule:#2b3544; --wash:#1c2431;
+    --a:#8aa8ff; --a-wash:#1b2648; --b:#55d2a8; --b-wash:#11302a; --ch:#f2b75e; --ch-wash:#33260f;
+    --ag:#c49dff; --ag-wash:#2a1d44; --eng:#a9b2bf; --eng-wash:#202935; --unk:#ff8f78; --unk-wash:#3b1d17;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0e131a; --sheet:#151c25; --ink:#e0e6ee; --ink-2:#9ba7b6; --rule:#2b3544; --wash:#1c2431;
+  --a:#8aa8ff; --a-wash:#1b2648; --b:#55d2a8; --b-wash:#11302a; --ch:#f2b75e; --ch-wash:#33260f;
+  --ag:#c49dff; --ag-wash:#2a1d44; --eng:#a9b2bf; --eng-wash:#202935; --unk:#ff8f78; --unk-wash:#3b1d17;
+  color-scheme:dark;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font:400 16px/1.75 var(--f-body);word-break:keep-all;overflow-wrap:break-word}
+.wrap{max-width:1152px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.prose{max-width:46rem}
+a{color:var(--a);text-underline-offset:3px}
+code,.mono{font-family:var(--f-mono);font-size:.86em}
+code{background:var(--wash);padding:.08em .38em;border-radius:4px;word-break:normal;overflow-wrap:anywhere}
+pre code{background:none;padding:0;border-radius:0;font-size:inherit;overflow-wrap:normal}
+:focus-visible{outline:2px solid var(--a);outline-offset:2px}
+
+.top{padding-block:56px 28px;border-bottom:1px solid var(--rule)}
+.eyebrow{font:500 12px/1.5 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);margin:0}
+h1{font:700 clamp(30px,4.4vw,46px)/1.22 var(--f-body);letter-spacing:-.02em;margin:.35em 0 .45em;text-wrap:balance}
+.lede{font-size:18px;line-height:1.75;margin:0;max-width:46rem}
+.meta{font:400 13px/1.7 var(--f-mono);color:var(--ink-2);margin:18px 0 0;max-width:60rem}
+
+.answers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 36px;margin:30px 0 4px}
+.answers>div{border-top:1px solid var(--rule);padding:14px 0 6px;min-width:0}
+.answers h2{font:600 16px/1.5 var(--f-body);margin:0 0 4px;letter-spacing:0}
+.answers h2 .q{font:600 12px var(--f-mono);color:var(--ink-2);margin-right:8px}
+.answers p{margin:0;font-size:15px;color:var(--ink-2)}
+@media (max-width:760px){.answers{grid-template-columns:minmax(0,1fr)}}
+
+nav.toc{margin:30px 0 0;border:1px solid var(--rule);border-radius:10px;background:var(--sheet);padding:16px 20px}
+nav.toc p{margin:0 0 6px;font:600 12px/1.4 var(--f-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}
+nav.toc ol{margin:0;padding-left:1.4em;columns:3 220px;column-gap:28px;font-size:15px}
+nav.toc li{break-inside:avoid;padding:2px 0}
+nav.toc a{color:var(--ink);text-decoration:none}
+nav.toc a:hover{color:var(--a);text-decoration:underline}
+
+section{padding-block:60px 4px;scroll-margin-top:12px}
+.sec-no{font:600 12px/1.4 var(--f-mono);letter-spacing:.1em;color:var(--ink-2);margin:0}
+h2.sec{font:700 27px/1.3 var(--f-body);letter-spacing:-.015em;margin:.25em 0 .4em;text-wrap:balance}
+h3{font:600 19px/1.45 var(--f-body);margin:1.8em 0 .5em;text-wrap:balance}
+p{margin:.6em 0}
+blockquote{margin:16px 0;padding:2px 0 2px 16px;border-left:3px solid var(--rule);color:var(--ink);max-width:46rem}
+blockquote p{margin:.3em 0}
+blockquote cite{display:block;font:400 12.5px/1.6 var(--f-mono);color:var(--ink-2);font-style:normal;margin-top:4px}
+
+figure{margin:22px 0 6px}
+.fig-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--rule);border-radius:10px;background:var(--sheet)}
+.fig-scroll svg{display:block;width:100%;height:auto}
+.min-kinds{min-width:900px}
+.min-pipe{min-width:900px}
+.min-arch{min-width:900px}
+.min-build{min-width:900px}
+figcaption{font-size:14px;line-height:1.65;color:var(--ink-2);margin-top:10px;max-width:50rem}
+figcaption b{color:var(--ink);font-weight:600}
+
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--ink-2);margin:16px 0 0;padding:0;list-style:none}
+.legend li{display:inline-flex;align-items:center;gap:8px}
+.sw{width:22px;height:13px;border-radius:3px;border:1.5px solid;display:inline-block}
+.sw.a{background:var(--a-wash);border-color:var(--a)}
+.sw.b{background:var(--b-wash);border-color:var(--b)}
+.sw.ch{background:var(--ch-wash);border-color:var(--ch)}
+.sw.ag{background:var(--ag-wash);border-color:var(--ag)}
+.sw.eng{background:var(--eng-wash);border-color:var(--eng)}
+.sw.h{background:var(--sheet);border-color:var(--ink-2)}
+.ln{width:28px;height:0;border-top:2px solid var(--ink);display:inline-block}
+.ln.ch{border-top:2.5px solid var(--ch)}
+.ln.unk{border-top:2px dashed var(--unk)}
+
+.dg text{font-family:var(--f-body)}
+.dg .t1{font-size:12.5px;font-weight:600;fill:var(--ink)}
+.dg .t2{font-size:11.5px;fill:var(--ink-2)}
+.dg .tm{font-family:var(--f-mono);font-size:10.5px;fill:var(--ink-2)}
+.dg .tmi{font-family:var(--f-mono);font-size:12px;font-weight:600}
+.dg .mid{text-anchor:middle}
+.dg .end{text-anchor:end}
+.dg .lbl{font-size:10.5px;font-weight:500;fill:var(--ink-2);paint-order:stroke;stroke:var(--sheet);stroke-width:4px;stroke-linejoin:round}
+.dg .lbl.ch{fill:var(--ch);font-weight:600}
+.dg .lbl.unk{fill:var(--unk);font-weight:600}
+.dg .box{stroke-width:1.4}
+.dg .panel{fill:var(--sheet);stroke:var(--rule);stroke-width:1}
+.dg .a .box{fill:var(--a-wash);stroke:var(--a)}
+.dg .b .box{fill:var(--b-wash);stroke:var(--b)}
+.dg .ch .box{fill:var(--ch-wash);stroke:var(--ch)}
+.dg .ag .box{fill:var(--ag-wash);stroke:var(--ag)}
+.dg .eng .box{fill:var(--eng-wash);stroke:var(--eng)}
+.dg .h .box{fill:var(--sheet);stroke:var(--ink-2)}
+.dg .note .box{fill:var(--sheet);stroke:var(--ink-2);stroke-dasharray:4 3}
+.dg .warn .box{fill:var(--unk-wash);stroke:var(--unk);stroke-dasharray:4 3}
+.dg .frame-a{fill:var(--a-wash);stroke:var(--a);stroke-width:1.4;fill-opacity:.45}
+.dg .frame-b{fill:var(--b-wash);stroke:var(--b);stroke-width:1.4;fill-opacity:.45}
+.dg .comp .box{fill:var(--sheet)}
+.dg .comp.a .box{stroke:var(--a)}
+.dg .comp.b .box{stroke:var(--b)}
+.dg .rowsep{stroke:var(--ch);stroke-width:1;opacity:.45}
+.dg .ar{fill:none;stroke:var(--ink);stroke-width:1.4}
+.dg .ar.ch{stroke:var(--ch);stroke-width:2.2}
+.dg .ar.unk{stroke:var(--unk);stroke-dasharray:5 4}
+.dg .ar.note{stroke:var(--ink-2);stroke-width:1.2;stroke-dasharray:3 3}
+.dg .mk-ink{fill:var(--ink)}
+.dg .mk-ch{fill:var(--ch)}
+.dg .mk-unk{fill:var(--unk)}
+.dg .mk-note{fill:var(--ink-2)}
+.dg .badge circle{fill:var(--ink)}
+.dg .badge text{fill:var(--sheet);font-family:var(--f-mono);font-size:10px;font-weight:700;text-anchor:middle}
+.dg .lane-sep line{stroke:var(--rule);stroke-width:1}
+.dg .lane-t{font-size:13px;font-weight:700;fill:var(--ink);text-anchor:middle}
+.dg .lane-s{font-size:11px;fill:var(--ink-2);text-anchor:middle}
+.dg .bar-h{fill:var(--ink-2)}
+.dg .bar-ag{fill:var(--ag)}
+.dg .bar-eng{fill:var(--eng)}
+.dg .col-t{font-size:13.5px;font-weight:700;fill:var(--ink);text-anchor:middle}
+.dg .row-t{font-size:12.5px;font-weight:600;fill:var(--ink)}
+
+.tbl{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--rule);border-radius:10px;background:var(--sheet);margin:18px 0 6px}
+table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.6}
+.tbl.wide table{min-width:860px}
+.tbl.mid table{min-width:700px}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--rule)}
+thead th{font:600 12.5px/1.4 var(--f-body);color:var(--ink-2);background:var(--wash);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+td code{font-size:12.5px}
+.pill{display:inline-block;font:600 11.5px/1 var(--f-body);padding:5px 8px;border-radius:999px;border:1px solid;white-space:nowrap}
+.pill.ok{color:var(--b);border-color:var(--b);background:var(--b-wash)}
+.pill.port{color:var(--a);border-color:var(--a);background:var(--a-wash)}
+.pill.no{color:var(--unk);border-color:var(--unk);background:var(--unk-wash)}
+.pill.mid{color:var(--ch);border-color:var(--ch);background:var(--ch-wash)}
+.pill.dim{color:var(--ink-2);border-color:var(--ink-2);background:var(--sheet)}
+
+.notes{margin:14px 0 0;padding-left:1.2em;max-width:52rem}
+.notes li{margin:.5em 0;font-size:15.5px;line-height:1.75}
+.notes li b{font-weight:600}
+.src{font:400 12.5px/1.7 var(--f-mono);color:var(--ink-2);margin:8px 0 0;word-break:normal;overflow-wrap:anywhere}
+
+.msgs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin:16px 0 0}
+@media (max-width:760px){.msgs{grid-template-columns:minmax(0,1fr)}}
+.msgs>div{border:1px solid var(--rule);border-radius:10px;background:var(--sheet);padding:14px 16px;min-width:0}
+.msgs h4{margin:0 0 8px;font:600 14.5px/1.4 var(--f-body)}
+.msgs ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.msgs li code{background:var(--ch-wash);color:var(--ch);font-size:12px}
+
+.split{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px;margin-top:14px}
+@media (max-width:820px){.split{grid-template-columns:minmax(0,1fr)}}
+.split h3{margin:0 0 8px;font-size:18px;padding-bottom:6px;border-bottom:1px solid var(--ink)}
+.split ul,.split ol{margin:0;padding-left:1.2em}
+.split li{margin:.55em 0;font-size:15px;line-height:1.7}
+.split li b{font-weight:600}
+
+.verdict{border:1px solid var(--rule);border-radius:12px;background:var(--sheet);padding:20px 22px;margin-top:18px}
+.verdict h3{margin:0 0 6px}
+.verdict .grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-top:10px}
+@media (max-width:900px){.verdict .grid{grid-template-columns:minmax(0,1fr)}}
+.verdict .grid>div{min-width:0}
+.verdict h4{margin:0 0 4px;font:600 14.5px/1.5 var(--f-body)}
+.verdict p{margin:0;font-size:14.5px;line-height:1.7}
+.lab{display:inline-block;font:600 12px/1 var(--f-body);padding:4px 7px;border-radius:5px;margin-bottom:6px}
+.lab.ok{background:var(--b-wash);color:var(--b)}
+.lab.ag{background:var(--ag-wash);color:var(--ag)}
+.lab.no{background:var(--unk-wash);color:var(--unk)}
+
+.alert{border:1px solid var(--unk);border-radius:10px;background:var(--unk-wash);padding:14px 18px;margin:18px 0 0;max-width:52rem}
+.alert b{color:var(--unk)}
+.alert p{margin:.3em 0;font-size:15px}
+
+.sources{columns:2 380px;column-gap:36px;margin:12px 0 0;padding-left:1.2em;font-size:14px;line-height:1.65}
+.sources li{break-inside:avoid;margin:0 0 8px}
+.sources .g{list-style:none;margin-left:-1.2em;font:600 12px/1.4 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin-top:14px}
+.sources .g:first-child{margin-top:0}
+
+footer{margin-top:64px;border-top:1px solid var(--rule);padding-block:24px 56px;font-size:14px;color:var(--ink-2)}
+footer p{margin:.4em 0;max-width:60rem}
+.related{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;border:1px solid var(--rule);border-radius:10px;background:var(--sheet);padding:14px 18px;margin:0 0 18px}
+.related b{color:var(--ink);font-weight:600}
+
+@media (max-width:600px){
+  body{font-size:15.5px}
+  .top{padding-block:36px 22px}
+  .lede{font-size:16.5px}
+  h2.sec{font-size:23px}
+  section{padding-block:46px 4px}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">리서치 보고서 · 게임 매시업 모드 · 2026-10-16 조사</p>
+  <h1>게임 섞기 모드는 어떻게 만들어지나</h1>
+  <p class="lede">엘든링에 오버워치를, 사이버펑크에 마인크래프트를 섞었다는 영상과 모드에는 서로 다른 세 가지가 섞여 있습니다. 다른 게임의 캐릭터 모델을 뜯어와 입히는 <b>에셋 이식</b>, 두 게임을 동시에 실행해 한쪽은 화면을 그리고 다른 쪽은 게임플레이를 계산하는 <b>패스스루 모드</b>, 그리고 조작할 수 없는 <b>AI 생성 영상</b>입니다. 2026년 9월 말부터 퍼진 것은 두 번째이고, 코드 대부분을 Claude Code 같은 AI 코딩 에이전트가 썼습니다.</p>
+  <p class="meta">조사 방법: 모드 페이지(Nexus는 공개 GraphQL API로 설명문 확인), GitHub 저장소와 설계 문서, 커뮤니티 위키, 기사. 원본이 삭제된 가이드는 커밋 기록이 남은 사본으로 확인했습니다. 영상은 프레임 단위로 분석하지 않았고, 확인한 사실과 추론은 본문에서 구분해 적었습니다.</p>
+
+  <div class="answers">
+    <div>
+      <h2><span class="q">Q1</span>엘든링 × 오버워치는?</h2>
+      <p>오버워치는 온라인 전용에 안티치트가 있어 ‘두 게임 동시 실행’의 재료가 될 수 없습니다. 확인되는 것은 2022–23년부터 있던 캐릭터 모델 이식(Mercy, D.Va 등)입니다. 화제가 된 ‘둠피스트’ 영상은 원본 모드를 찾지 못했고, ‘Overwatch × Elden Ring 작동’을 내건 GitHub 저장소 두 곳은 악성코드 유포에 흔한 미끼 패턴이었습니다.</p>
+    </div>
+    <div>
+      <h2><span class="q">Q2</span>사이버펑크 × 마인크래프트는?</h2>
+      <p>바이럴 클립은 재업로드만 돌고 원작자와 배포물을 찾지 못해 확인할 수 없었습니다. 확인되는 것은 사이버펑크에 마인크래프트풍 아이템을 넣은 에셋 모드와, 반대로 마인크래프트 안에 사이버펑크를 재현한 모드입니다.</p>
+    </div>
+    <div>
+      <h2><span class="q">Q3</span>실제로 플레이되는 매시업은?</h2>
+      <p>EldenCraft(엘든링 × 마인크래프트 Java), SkyCraft(스카이림 × 마인크래프트), ArkWeb(스파이더맨 × 아캄 나이트) 등은 소스나 배포물이 있습니다. 두 게임을 동시에 띄우고, 공유 메모리와 GPU 공유 텍스처로 매 프레임 상태와 픽셀을 주고받습니다.</p>
+    </div>
+    <div>
+      <h2><span class="q">Q4</span>REA를 썼나?</h2>
+      <p>공개된 매시업 저장소·가이드·기사 어디에도 REA 사용 언급은 없습니다. 쓰인 것은 Claude Code(Opus 5.5)와 Ghidra, 그리고 에이전트가 직접 짠 분석 스크립트입니다. 10월 6일 개정된 가이드는 Ghidra·IDA를 MCP 서버로 연결해 쓰라고 권합니다.</p>
+    </div>
+  </div>
+
+  <nav class="toc" aria-label="목차">
+    <p>목차</p>
+    <ol>
+      <li><a href="#kinds">세 가지 ‘섞기’</a></li>
+      <li><a href="#verdicts">사례별 판정</a></li>
+      <li><a href="#port">방식 A: 에셋 이식</a></li>
+      <li><a href="#pass">방식 B: 패스스루</a></li>
+      <li><a href="#build">AI 에이전트와 만드는 순서</a></li>
+      <li><a href="#re">리버스 엔지니어링과 REA</a></li>
+      <li><a href="#fake">방식 C: AI 영상 구별법</a></li>
+      <li><a href="#risk">위험과 규칙</a></li>
+      <li><a href="#sources">출처</a></li>
+    </ol>
+  </nav>
+</header>
+
+<main>
+
+<section id="kinds">
+  <p class="sec-no">01</p>
+  <h2 class="sec">세 가지 ‘섞기’</h2>
+  <div class="prose"><p>셋을 가르는 기준은 <b>무엇이 두 게임의 경계를 넘는가</b>입니다. 에셋 이식은 파일이 넘어가고 게임은 하나만 돕니다. 패스스루는 두 게임이 동시에 돌면서 상태와 픽셀이 매 프레임 넘어갑니다. AI 영상은 픽셀만 있고 돌아가는 게임이 없습니다.</p></div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="dg min-kinds" viewBox="0 0 1120 268" role="img" aria-label="세 가지 게임 섞기 비교. A 에셋 이식: 게임 B 데이터에서 모델과 텍스처를 추출해 변환 도구로 게임 A 파일의 갑옷을 교체하고 게임 A 하나만 실행한다. B 패스스루: 게임 A와 게임 B가 공유 메모리로 상태와 이벤트를 주고받고, 게임 B의 오프스크린 렌더를 게임 A가 깊이 합성하며 두 게임을 모두 실행한다. C AI 생성 영상: 원본 영상이나 프롬프트를 생성 모델에 넣어 픽셀만 만들고 실행되는 게임은 없다.">
+        <defs>
+          <marker id="k-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-ink" d="M0,0L10,5L0,10z"/></marker>
+          <marker id="k-ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-ch" d="M0,0L10,5L0,10z"/></marker>
+        </defs>
+        <rect class="panel" x="0.5" y="0.5" width="359" height="267" rx="10"/>
+        <rect class="panel" x="380.5" y="0.5" width="359" height="267" rx="10"/>
+        <rect class="panel" x="760.5" y="0.5" width="359" height="267" rx="10"/>
+
+        <text class="t1" x="18" y="28">A · 에셋 이식</text>
+        <text class="t2" x="18" y="46">다른 게임의 모델을 옮겨 입힌다</text>
+        <g class="b"><rect class="box" x="16" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="64" y="85">게임 B 데이터</text><text class="t2 mid" x="64" y="103">모델 · 텍스처</text></g>
+        <g class="eng"><rect class="box" x="132" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="180" y="85">변환 도구</text><text class="t2 mid" x="180" y="103">Blender 등</text></g>
+        <g class="a"><rect class="box" x="248" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="296" y="85">게임 A 파일</text><text class="t2 mid" x="296" y="103">갑옷 교체</text></g>
+        <path class="ar" d="M112,90H131" marker-end="url(#k-a)"/>
+        <path class="ar" d="M228,90H247" marker-end="url(#k-a)"/>
+        <g class="a"><rect class="box" x="16" y="166" width="328" height="36" rx="6"/><text class="t1 mid" x="180" y="189">실행되는 게임: A 하나 (오프라인)</text></g>
+        <text class="t1" x="18" y="230">넘어가는 것: 파일</text>
+        <text class="t2" x="18" y="249">예: Mercy·D.Va 이식, 다이아몬드 검</text>
+
+        <text class="t1" x="398" y="28">B · 패스스루 (두 게임 동시 실행)</text>
+        <text class="t2" x="398" y="46">한쪽은 그리고, 한쪽은 계산한다</text>
+        <g class="a"><rect class="box" x="396" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="444" y="85">게임 A</text><text class="t2 mid" x="444" y="103">세계를 그림</text></g>
+        <g class="ch"><rect class="box" x="512" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="560" y="85">공유 메모리</text><text class="t2 mid" x="560" y="103">상태 · 이벤트</text></g>
+        <g class="b"><rect class="box" x="628" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="676" y="85">게임 B</text><text class="t2 mid" x="676" y="103">물리 · 블록</text></g>
+        <path class="ar ch" d="M492,80H509" marker-end="url(#k-ch)"/>
+        <path class="ar ch" d="M512,100H495" marker-end="url(#k-ch)"/>
+        <path class="ar ch" d="M608,80H625" marker-end="url(#k-ch)"/>
+        <path class="ar ch" d="M628,100H611" marker-end="url(#k-ch)"/>
+        <path class="ar ch" d="M676,118V136H444V121" marker-end="url(#k-ch)"/>
+        <text class="lbl ch mid" x="560" y="152">B의 오프스크린 렌더 → A가 깊이 합성</text>
+        <g class="a"><rect class="box" x="396" y="166" width="156" height="36" rx="6"/><text class="t1 mid" x="474" y="189">게임 A 실행</text></g>
+        <g class="b"><rect class="box" x="568" y="166" width="156" height="36" rx="6"/><text class="t1 mid" x="646" y="189">게임 B 실행 · 창 숨김</text></g>
+        <text class="t1" x="398" y="230">넘어가는 것: 상태와 픽셀 (매 프레임)</text>
+        <text class="t2" x="398" y="249">예: EldenCraft, SkyCraft, ArkWeb</text>
+
+        <text class="t1" x="778" y="28">C · AI 생성 영상</text>
+        <text class="t2" x="778" y="46">조작할 수 없는 픽셀</text>
+        <g class="eng"><rect class="box" x="776" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="824" y="85">원본 영상</text><text class="t2 mid" x="824" y="103">또는 프롬프트</text></g>
+        <g class="ag"><rect class="box" x="892" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="940" y="85">생성 모델</text><text class="t2 mid" x="940" y="103">영상 · 스타일</text></g>
+        <g class="warn"><rect class="box" x="1008" y="62" width="96" height="56" rx="6"/><text class="t1 mid" x="1056" y="85">결과 영상</text><text class="t2 mid" x="1056" y="103">픽셀만</text></g>
+        <path class="ar" d="M872,90H891" marker-end="url(#k-a)"/>
+        <path class="ar" d="M988,90H1007" marker-end="url(#k-a)"/>
+        <g class="warn"><rect class="box" x="776" y="166" width="328" height="36" rx="6"/><text class="t1 mid" x="940" y="189">실행되는 게임 없음 · 조작 불가</text></g>
+        <text class="t1" x="778" y="230">넘어가는 것: 픽셀만</text>
+        <text class="t2" x="778" y="249">예: 출처를 찾을 수 없는 바이럴 클립</text>
+      </svg>
+    </div>
+    <figcaption><b>그림 1. 경계를 넘는 것이 다르다.</b> 파란색은 화면을 그리는 게임 A, 초록색은 게임플레이를 대는 게임 B, 호박색은 두 게임 사이를 오가는 데이터입니다. 패스스루만 두 게임이 동시에 돌아갑니다.</figcaption>
+  </figure>
+</section>
+
+<section id="verdicts">
+  <p class="sec-no">02</p>
+  <h2 class="sec">사례별 판정</h2>
+  <div class="prose"><p>질문에 나온 두 조합과, 조사 중 확인된 대표 사례를 방식별로 나눴습니다. ‘판정’은 공개된 소스나 배포물로 확인했는지를 뜻합니다.</p></div>
+  <div class="tbl wide">
+    <table>
+      <thead><tr><th>사례</th><th>방식</th><th>판정</th><th>근거</th></tr></thead>
+      <tbody>
+        <tr><td>Mercy · D.Va를 엘든링에 (Nexus, 2022–23)</td><td>에셋 이식</td><td><span class="pill ok">확인됨</span></td><td>Nexus 모드 페이지 #3522, #1481. Mercy는 기존 갑옷 네 부위를 교체하며, 천 물리가 들어 있지만 “웨이트 페인팅은 최선이 아니다”라고 적혀 있습니다.</td></tr>
+        <tr><td>“엘든링에 둠피스트를” 영상 (2026-10)</td><td>불명</td><td><span class="pill mid">원본 미확인</span></td><td>해설 쇼츠만 있고 Nexus·GitHub에 해당 모드가 없습니다. 오버워치는 온라인 전용이라 패스스루가 불가능하므로, 실제라면 모델·모션 이식일 가능성이 높습니다(추론).</td></tr>
+        <tr><td>“Overwatch × Elden Ring ✅ Working” GitHub 저장소 2곳</td><td>—</td><td><span class="pill no">미끼 패턴</span></td><td>계정 생성 2분 뒤 만든 저장소, 관리자 PowerShell로 원격 스크립트를 바로 실행하라는 안내, 암호 걸린 zip, 백신을 끄라는 요구. 페이로드는 분석하지 않았습니다(<a href="#risk">08절</a>).</td></tr>
+        <tr><td>EldenCraft: 엘든링 × 마인크래프트 Java (Nexus #11259)</td><td>패스스루</td><td><span class="pill ok">확인됨</span></td><td>릴리스 v0.25.5, 다운로드 1,614회, 소스 공개. “두 게임을 동시에 실행”하고 공유 GPU 텍스처를 깊이 인식 합성합니다. SkyCraft와 달리 엘든링이 이동·충돌·HP를 맡습니다. 엘든링 실행 파일 2.7.1.0만 받고 오프라인 싱글 전용입니다.</td></tr>
+        <tr><td>minecraft-crossover-bridge (Mac), Minecraft-Ring (Windows)</td><td>패스스루</td><td><span class="pill ok">확인됨</span></td><td>공개 소스. 엘든링을 호스트로 같은 구조를 구현합니다.</td></tr>
+        <tr><td>“Minecraft in Elden Ring” 클립 (X, 9월 29일, 조회 2,370만)</td><td>패스스루?</td><td><span class="pill mid">논란</span></td><td>GamesRadar는 근거 없이 ‘AI slop’이라고 썼습니다. 제작자는 Mac 전용 빌드라고 밝혔고, 공개된 Mac 브리지가 이 아이디어를 인용하며 기술적으로 가능함을 보여 줍니다. 미공개된 실제 빌드일 가능성이 높습니다(추론).</td></tr>
+        <tr><td>엘든링 × 스파이더맨</td><td>패스스루</td><td><span class="pill mid">결과물 미확인</span></td><td>가이드에 실린 Discord 일화(“3–4시간 주고받은 끝에, 엉성하지만 작동”)뿐입니다.</td></tr>
+        <tr><td>ArkWeb: 스파이더맨 리마스터 × 아캄 나이트</td><td>패스스루</td><td><span class="pill ok">확인됨</span></td><td>공개 소스, Dexerto 보도. 배트맨을 숨은 꼭두각시로 두고 스파이더맨을 그립니다.</td></tr>
+        <tr><td>SkyCraft: 스카이림 × 마인크래프트</td><td>패스스루</td><td><span class="pill ok">확인됨 · 원형</span></td><td>GitHub(별 약 1.2천). ‘패스스루’라는 이름과 설계 문서가 여기서 나왔고, 대부분의 후속작이 이 구조를 복사합니다.</td></tr>
+        <tr><td>스카이림에 엘든링식 전투</td><td>재구현</td><td><span class="pill ok">확인됨</span></td><td>Rust로 다시 쓴 플레이어 컨트롤러로, 두 게임을 동시에 돌리지 않습니다. GamesRadar는 ‘AI 없이 만든’ 사례로 소개했지만, 커밋 27개 중 21개에 Claude 공동 작성 표시가 있습니다. 같은 아이디어의 패스스루판(Skyring)은 따로 있습니다.</td></tr>
+        <tr><td>“사이버펑크 × 마인크래프트” 영상</td><td>불명</td><td><span class="pill mid">확인 불가</span></td><td>재업로드만 돌고 원작자를 찾지 못했습니다. 한 쇼츠 설명란의 “Claude Code + ReShade” 주장은 검증되지 않았습니다.</td></tr>
+        <tr><td>사이버펑크 속 마인크래프트 아이템 (다이아몬드 검, 투척 무기, 돼지 비행차)</td><td>에셋 이식</td><td><span class="pill ok">확인됨</span></td><td>Nexus #7857(토마호크 교체), #12744(CET 명령으로 지급), #15581(비행차를 마인크래프트 돼지로 교체).</td></tr>
+        <tr><td>마인크래프트 속 사이버펑크 (Minerunner 2077, 나이트 시티 맵)</td><td>일반 모드 · 재창작</td><td><span class="pill ok">확인됨</span></td><td>Fabric 모드(사이버웨어, 리퍼닥 주민)와, 15명이 18개월 걸려 지은 나이트 시티풍 맵(정확한 복제는 아님). 사이버펑크를 주제로 마인크래프트 안에서 새로 만든 콘텐츠입니다.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="port">
+  <p class="sec-no">03</p>
+  <h2 class="sec">방식 A: 에셋 이식</h2>
+  <div class="prose"><p>가장 오래된 방식입니다. 다른 게임에서 모델과 텍스처를 꺼내, 대상 게임의 골격과 파일 형식에 맞춰 바꾼 뒤 기존 아이템 자리에 끼워 넣습니다. 게임은 대상 게임 하나만 실행되므로, 겉모습은 바뀌어도 움직임과 능력은 대상 게임의 것을 그대로 씁니다.</p></div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="dg min-pipe" viewBox="0 0 1120 652" role="img" aria-label="에셋 이식 파이프라인. 엘든링 경로: 오버워치 CASC 저장소에서 DataTool로 추출, Blender에서 골격에 맞춤, FLVER로 변환, MATBIN과 TPF로 재질과 텍스처 설정, WitchyBND로 재포장, EquipParamProtector의 equipModelId 갑옷 교체, me3로 로드. 사이버펑크 경로: Sketchfab 모델 확보, Blender에서 armature에 맞춤, WolvenKit으로 mesh 가져오기, MLSetupBuilder로 재질, archive로 포장, 기존 무기 교체 또는 CET 지급, archive 모드로 로드.">
+        <defs>
+          <marker id="p-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-ink" d="M0,0L10,5L0,10z"/></marker>
+        </defs>
+        <text class="col-t" x="395" y="26">엘든링 · FromSoftware</text>
+        <text class="t2 mid" x="395" y="46">예: 오버워치의 Mercy (Nexus #3522)</text>
+        <text class="col-t" x="880" y="26">사이버펑크 2077 · REDengine</text>
+        <text class="t2 mid" x="880" y="46">예: Diamond Sword (#7857) · When Pigs Fly (#15581)</text>
+
+        <g class="badge"><circle cx="22" cy="102" r="9"/><text x="22" y="105.5">1</text></g><text class="row-t" x="40" y="106">원본 확보</text>
+        <g class="badge"><circle cx="22" cy="184" r="9"/><text x="22" y="187.5">2</text></g><text class="row-t" x="40" y="188">3D 편집</text>
+        <g class="badge"><circle cx="22" cy="266" r="9"/><text x="22" y="269.5">3</text></g><text class="row-t" x="40" y="270">형식 변환</text>
+        <g class="badge"><circle cx="22" cy="340" r="9"/><text x="22" y="343.5">4</text></g><text class="row-t" x="40" y="344">재질 · 텍스처</text>
+        <g class="badge"><circle cx="22" cy="414" r="9"/><text x="22" y="417.5">5</text></g><text class="row-t" x="40" y="418">다시 포장</text>
+        <g class="badge"><circle cx="22" cy="488" r="9"/><text x="22" y="491.5">6</text></g><text class="row-t" x="40" y="492">게임에 연결</text>
+        <g class="badge"><circle cx="22" cy="562" r="9"/><text x="22" y="565.5">7</text></g><text class="row-t" x="40" y="566">로드 · 실행</text>
+
+        <g class="b"><rect class="box" x="170" y="76" width="450" height="52" rx="6"/><text class="t1" x="184" y="97">원본 모델 추출</text><text class="t2" x="184" y="115">DataTool(OWLib · TACTLib)로 오버워치 CASC 저장소에서 모델·텍스처 추출</text></g>
+        <g class="b"><rect class="box" x="660" y="76" width="440" height="52" rx="6"/><text class="t1" x="674" y="97">원본 모델 확보</text><text class="t2" x="674" y="115">Sketchfab 무료 모델 또는 직접 모델링 (3ds Max · Noesis 등)</text></g>
+
+        <g class="eng"><rect class="box" x="170" y="150" width="930" height="68" rx="6"/><text class="t1" x="184" y="171">Blender에서 대상 게임의 골격에 맞추기</text><text class="t2" x="184" y="188">골격은 그대로 두고 메시를 맞춘다 · 리깅 · 비율 조정 · 웨이트 전송</text><text class="t2" x="184" y="205">엘든링: 부위마다 플레이어 c0000 골격의 사본, 좌표계는 ‘XZY, X 반전’ · 사이버펑크: 게임 armature에 다시 붙이고 이름 기준으로 웨이트 전송</text></g>
+
+        <g class="eng"><rect class="box" x="170" y="240" width="450" height="52" rx="6"/><text class="t1" x="184" y="261">FBX → FLVER 변환</text><text class="t2" x="184" y="279">FLVER Editor 2 · Soulstruct(Blender) · FbxImporter</text></g>
+        <g class="eng"><rect class="box" x="660" y="240" width="440" height="52" rx="6"/><text class="t1" x="674" y="261">.glb → 게임의 .mesh로 가져오기</text><text class="t2" x="674" y="279">WolvenKit (기존 .mesh 필요 · 플레이어 몸은 LOD당 서브메시 10개까지)</text></g>
+
+        <g class="eng"><rect class="box" x="170" y="314" width="450" height="52" rx="6"/><text class="t1" x="184" y="335">재질과 텍스처 경로</text><text class="t2" x="184" y="353">MATBIN에서 텍스처 경로 수정 · 텍스처 묶음은 TPF(DDS)</text></g>
+        <g class="eng"><rect class="box" x="660" y="314" width="440" height="52" rx="6"/><text class="t1" x="674" y="335">재질</text><text class="t2" x="674" y="353">MLSetupBuilder로 재질 설정(mlsetup)</text></g>
+
+        <g class="eng"><rect class="box" x="170" y="388" width="450" height="52" rx="6"/><text class="t1" x="184" y="409">다시 포장</text><text class="t2" x="184" y="427">WitchyBND로 parts BND 재포장 (DCX 압축, 1.12부터 ZSTD)</text></g>
+        <g class="eng"><rect class="box" x="660" y="388" width="440" height="52" rx="6"/><text class="t1" x="674" y="409">다시 포장</text><text class="t2" x="674" y="427">WolvenKit으로 .archive · 새 아이템이면 ArchiveXL · TweakXL</text></g>
+
+        <g class="a"><rect class="box" x="170" y="462" width="450" height="52" rx="6"/><text class="t1" x="184" y="483">게임에 연결</text><text class="t2" x="184" y="501">EquipParamProtector의 equipModelId로 갑옷 부위 교체 (Smithbox)</text></g>
+        <g class="a"><rect class="box" x="660" y="462" width="440" height="52" rx="6"/><text class="t1" x="674" y="483">게임에 연결</text><text class="t2" x="674" y="501">기존 무기 교체(토마호크 → 다이아몬드 검) 또는 CET로 Game.AddToInventory</text></g>
+
+        <g class="a"><rect class="box" x="170" y="536" width="450" height="52" rx="6"/><text class="t1" x="184" y="557">로드 · 실행 (오프라인)</text><text class="t2" x="184" y="575">me3 패키지 오버라이드 · 공식 매치메이킹 기본 차단 · 별도 세이브</text></g>
+        <g class="a"><rect class="box" x="660" y="536" width="440" height="52" rx="6"/><text class="t1" x="674" y="557">로드 · 실행</text><text class="t2" x="674" y="575">archive 모드 폴더 · 공식 REDmod는 커뮤니티 위키가 비권장</text></g>
+
+        <path class="ar" d="M395,128V149" marker-end="url(#p-a)"/>
+        <path class="ar" d="M880,128V149" marker-end="url(#p-a)"/>
+        <path class="ar" d="M395,218V239" marker-end="url(#p-a)"/>
+        <path class="ar" d="M880,218V239" marker-end="url(#p-a)"/>
+        <path class="ar" d="M395,292V313" marker-end="url(#p-a)"/>
+        <path class="ar" d="M880,292V313" marker-end="url(#p-a)"/>
+        <path class="ar" d="M395,366V387" marker-end="url(#p-a)"/>
+        <path class="ar" d="M880,366V387" marker-end="url(#p-a)"/>
+        <path class="ar" d="M395,440V461" marker-end="url(#p-a)"/>
+        <path class="ar" d="M880,440V461" marker-end="url(#p-a)"/>
+        <path class="ar" d="M395,514V535" marker-end="url(#p-a)"/>
+        <path class="ar" d="M880,514V535" marker-end="url(#p-a)"/>
+
+        <g class="note"><rect class="box" x="170" y="604" width="930" height="40" rx="6"/><text class="t1" x="184" y="629">밑바탕은 파일 형식 리버스 엔지니어링 <tspan class="t2">— SoulsFormats · BinderKeys(암호 키와 해시 경로 사전) · Paramdex / WolvenKit · RED4ext RTTI 덤프</tspan></text></g>
+      </svg>
+    </div>
+    <figcaption><b>그림 2. 에셋 이식 파이프라인.</b> 2번 단계만 공통이고 나머지는 엔진마다 도구가 다릅니다. 엘든링 경로는 Souls 모딩 위키의 모델 교체 절차를, 사이버펑크 경로는 Cyberpunk 2077 모딩 위키의 이식 문서와 실제 모드 설명을 따랐습니다.</figcaption>
+  </figure>
+
+  <ol class="notes">
+    <li><b>왜 비율이 깨지나.</b> 엘든링 갑옷은 공유된 플레이어 골격(c0000)의 사본에 스킨되고 공유 애니메이션으로 움직입니다. 그래서 이식하는 사람은 골격을 바꾸지 않고 외부 메시를 엘든링의 뼈 위치에 맞춥니다(추론). 이식 페이지들의 증상이 이와 맞습니다. 레지던트 이블 2의 드레스는 기본 대기 자세에서 늘어나고, 2B의 치마는 몸을 뚫고 나오며, 마스터 치프는 목이 뚫려 몸 전체를 가리는 갑옷 세트로 바꿔 해결했습니다.</li>
+    <li><b>오버워치 모델은 어디서 오나.</b> DataTool(OWLib, MIT 라이선스)이 TACTLib로 블리자드의 CASC 저장소를 읽어 모델·맵·파일을 꺼내고, io_scene_owm 애드온으로 Blender에 가져옵니다. 다만 이렇게 만든 결과를 배포하는 것은 블리자드 EULA와 Nexus 규정에 어긋납니다(<a href="#risk">08절</a>).</li>
+    <li><b>움직임과 능력은 따로다.</b> 애니메이션은 HKX(Havok), 공격 판정·효과음 같은 이벤트는 TAE에 있고 DSAnimStudio로 편집합니다. 2B 대기 모션 모드의 설명처럼, 플레이어 애니메이션을 바꾸면 침입·소환된 인간형 NPC에도 같이 적용됩니다. 오버워치 영웅의 ‘능력’을 넣으려면 모델과 별개로 이 작업을 해야 합니다.</li>
+    <li><b>가장 단순한 형태.</b> 2016년 폴아웃 4의 “Minecraft FO4”는 파일 166개를 바닐라 에셋 이름 그대로 덮어썼습니다. 크리퍼는 방호복(HazmatSuit), 스티브는 전쟁 전 내의(PrewarUnderarmor), 블록은 창고 바닥(WrhsFloor01.nif) 자리에 들어갔습니다.</li>
+  </ol>
+  <p class="src">근거 · soulsmodding.com tutorial:export-edit-and-import-models · ividyon의 엘든링 모델링 문서 · github.com/overtools/OWLib · wiki.redmodding.org(porting-3d-objects-to-cyberpunk) · Nexus 모드 설명(엘든링 #3522·#1213·#5697·#684·#4738, 폴아웃 4 #15660, 사이버펑크 #7857·#12744·#15581)</p>
+</section>
+
+<section id="pass">
+  <p class="sec-no">04</p>
+  <h2 class="sec">방식 B: 패스스루</h2>
+  <div class="prose">
+    <p>2026년 9월 말 스카이림 × 마인크래프트(SkyCraft)에서 시작된 방식입니다. 제작자는 처음에 이렇게 소개했습니다. “마인크래프트와 스카이림이 동시에 돌고, 둘이 통신하게 하는 모드를 양쪽에 만든다.” 커뮤니티 가이드의 정의는 다음과 같습니다.</p>
+  </div>
+  <blockquote><p>“One game (the <b>host</b>) draws the world. The other game supplies the gameplay, like movement, blocks, or combat.” 한 게임(호스트)이 세계를 그리고, 다른 게임이 이동·블록·전투 같은 게임플레이를 댄다.</p><cite>AI Game Modding Guides · 02-passthrough-mods.md</cite></blockquote>
+  <div class="prose"><p>아래 그림은 SkyCraft 설계 문서(DESIGN.md)를 그대로 옮긴 것입니다. 엘든링 판도 ‘두 게임 동시 실행 + 공유 메모리 + 공유 텍스처 합성’이라는 뼈대는 같지만, 주입 방식과 권한 분배는 프로젝트마다 다릅니다(아래 표). 특히 EldenCraft는 권한을 반대로 나눕니다.</p></div>
+  <ul class="legend" aria-label="범례">
+    <li><span class="sw a"></span>게임 A · 호스트</li>
+    <li><span class="sw b"></span>게임 B · 게임플레이</li>
+    <li><span class="sw ch"></span>두 게임 사이의 채널</li>
+    <li><span class="ln ch"></span>오가는 데이터 (화살표 방향)</li>
+    <li><span class="sw ag"></span>AI 에이전트 · 개발</li>
+  </ul>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="dg min-arch" viewBox="0 0 1120 576" role="img" aria-label="패스스루 아키텍처. 왼쪽 게임 A 호스트 프로세스에는 플레이어 꼭두각시와 카메라 덮어쓰기, 입력 가로채기, 충돌 형상과 NPC 위치 보내기, 타격을 피해 처리로 넘기기, 깊이 검사 후 합성 구성요소가 있다. 오른쪽 게임 B 프로세스에는 플레이어 위치와 물리 권한, 입력 수신, 충돌 질의 주입, 전투 판정과 블록 변경, 오프스크린 렌더가 있다. 가운데 공유 메모리로 PlayerState와 CameraState는 B에서 A로, Input과 CollisionSection, ActorUpsert는 A에서 B로, HitActor와 BlockChange는 B에서 A로 간다. 오프스크린 렌더는 GPU 공유 텍스처로 A에 전달된다. 아래에는 메시지를 한 곳에서 정의하고 AI 에이전트가 코드를 쓰며 사람이 플레이테스트한다는 개발 방식이 있다.">
+        <defs>
+          <marker id="a-ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-ch" d="M0,0L10,5L0,10z"/></marker>
+        </defs>
+        <rect class="frame-a" x="10" y="10" width="420" height="470" rx="10"/>
+        <text class="t1" x="28" y="38">게임 A · 호스트: 화면을 그린다</text>
+        <text class="t2" x="28" y="57">예: 스카이림(SKSE 플러그인) · 엘든링(me3 DLL · dinput8 프록시)</text>
+        <text class="t2" x="28" y="75">자기 세계 · NPC · 충돌 · 렌더러는 그대로 돌아감</text>
+
+        <rect class="frame-b" x="690" y="10" width="420" height="470" rx="10"/>
+        <text class="t1" x="708" y="38">게임 B · 게임플레이: 창을 숨기고 계산한다</text>
+        <text class="t2" x="708" y="57">예: 마인크래프트 Java (Fabric 모드 + Mixins)</text>
+        <text class="t2" x="708" y="75">자기 지형은 거의 없음 · JVM 힙 약 3GB</text>
+
+        <g class="comp a"><rect class="box" x="28" y="128" width="384" height="44" rx="6"/><text class="t1" x="42" y="146">플레이어 꼭두각시 · 카메라 덮어쓰기</text><text class="t2" x="42" y="163">B가 보낸 위치 · 시점 · 뷰/투영 행렬로, 1인칭 고정</text></g>
+        <g class="comp a"><rect class="box" x="28" y="188" width="384" height="44" rx="6"/><text class="t1" x="42" y="206">원시 입력 가로채기 → B로 전달</text><text class="t2" x="42" y="223">A의 조작은 막음 · A 메뉴가 열리면 A로</text></g>
+        <g class="comp a"><rect class="box" x="28" y="248" width="384" height="44" rx="6"/><text class="t1" x="42" y="266">주변 충돌 형상 · NPC 위치 보내기</text><text class="t2" x="42" y="283">Havok 레이캐스트 결과 · NPC는 20 Hz</text></g>
+        <g class="comp a"><rect class="box" x="28" y="308" width="384" height="44" rx="6"/><text class="t1" x="42" y="326">B의 타격을 A의 피해 처리로</text><text class="t2" x="42" y="343">호출할 함수는 RE로 찾을 계획(Ghidra) · 대안 DamageActorValue</text></g>
+        <g class="comp a"><rect class="box" x="28" y="410" width="384" height="44" rx="6"/><text class="t1" x="42" y="428">깊이 검사 후 합성</text><text class="t2" x="42" y="445">B의 world 레이어를 A의 깊이 버퍼와 비교 · GUI는 맨 위</text></g>
+
+        <g class="comp b"><rect class="box" x="708" y="128" width="384" height="44" rx="6"/><text class="t1" x="722" y="146">플레이어 위치 · 물리의 권한</text><text class="t2" x="722" y="163">보간된 렌더 위치를 매 프레임 보냄</text></g>
+        <g class="comp b"><rect class="box" x="708" y="188" width="384" height="44" rx="6"/><text class="t1" x="722" y="206">키보드 · 마우스 핸들러로 입력 받기</text><text class="t2" x="722" y="223">숨긴 창이 포커스를 가진 것처럼 동작</text></g>
+        <g class="comp b"><rect class="box" x="708" y="248" width="384" height="44" rx="6"/><text class="t1" x="722" y="266">A의 형상을 충돌 질의에 주입</text><text class="t2" x="722" y="283">B의 물리가 그대로 A의 지형 위에서 돎 · NPC는 투명 프록시</text></g>
+        <g class="comp b"><rect class="box" x="708" y="308" width="384" height="44" rx="6"/><text class="t1" x="722" y="326">전투 판정 · 블록 변경</text><text class="t2" x="722" y="343">HitActor · BlockChange · UseTarget 이벤트</text></g>
+        <g class="comp b"><rect class="box" x="708" y="410" width="384" height="44" rx="6"/><text class="t1" x="722" y="428">오프스크린 렌더</text><text class="t2" x="722" y="445">world · hand · GUI 세 레이어를 A의 해상도로</text></g>
+
+        <g class="ch"><rect class="box" x="450" y="88" width="220" height="286" rx="8"/></g>
+        <text class="t1 mid" x="560" y="108">공유 메모리</text>
+        <text class="tm mid" x="560" y="123">Local\SkyCraft_v1</text>
+        <line class="rowsep" x1="462" y1="180" x2="658" y2="180"/>
+        <line class="rowsep" x1="462" y1="240" x2="658" y2="240"/>
+        <line class="rowsep" x1="462" y1="300" x2="658" y2="300"/>
+        <line class="rowsep" x1="462" y1="352" x2="658" y2="352"/>
+        <text class="tm mid" x="560" y="154">◀ PlayerState</text>
+        <text class="t2 mid" x="560" y="170">CameraState · 매 프레임</text>
+        <text class="tm mid" x="560" y="214">Input ▶</text>
+        <text class="t2 mid" x="560" y="230">입력 이벤트</text>
+        <text class="tm mid" x="560" y="274">CollisionSection ▶</text>
+        <text class="t2 mid" x="560" y="290">ActorUpsert · PlayerHurt</text>
+        <text class="tm mid" x="560" y="334">◀ HitActor · BlockChange</text>
+        <text class="t2 mid" x="560" y="367">seqlock 슬롯 · 링 버퍼 2개 · 하트비트</text>
+
+        <g class="ch"><rect class="box" x="450" y="400" width="220" height="64" rx="8"/></g>
+        <text class="t1 mid" x="560" y="421">GPU 공유 텍스처</text>
+        <text class="tm mid" x="560" y="438">WGL_NV_DX_interop2 · Vulkan</text>
+        <text class="t2 mid" x="560" y="455">BeginFrame N ▶ ◀ FrameReady</text>
+
+        <path class="ar ch" d="M708,150H673" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M450,150H415" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M412,210H447" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M670,210H705" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M412,270H447" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M670,270H705" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M708,330H673" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M450,330H415" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M708,432H673" marker-end="url(#a-ch)"/>
+        <path class="ar ch" d="M450,432H415" marker-end="url(#a-ch)"/>
+
+        <g class="ag"><rect class="box" x="10" y="498" width="1100" height="68" rx="8"/></g>
+        <text class="t1" x="28" y="522">만드는 방법</text>
+        <text class="t2" x="28" y="541">메시지는 protocol/messages.* 한 곳에서 정의해 C++ 헤더와 Java 클래스를 생성 · 고정 크기 · 리틀엔디언 · 양쪽 레이아웃 테스트</text>
+        <text class="t2" x="28" y="558">코드는 AI 에이전트(Claude Code)가 쓰고, 사람은 두 게임을 띄워 플레이테스트 · 한쪽이 죽으면 하트비트로 감지해 안전 상태로</text>
+      </svg>
+    </div>
+    <figcaption><b>그림 3. 패스스루 아키텍처 (SkyCraft 설계 기준).</b> 직관과 달리 게임플레이 게임(B)이 플레이어 위치와 물리의 권한을 갖고, 호스트(A)의 플레이어는 B가 시키는 대로 움직이는 꼭두각시가 됩니다. GPU 공유가 안 되면 CPU로 읽어 올리며, 이때 약 1프레임이 늦어집니다.</figcaption>
+  </figure>
+
+  <h3>매 프레임 벌어지는 일</h3>
+  <ol class="notes">
+    <li><b>프레임 시작.</b> A가 “BeginFrame N”과 카메라를 보내면 두 게임이 병렬로 그립니다. A는 B의 “frame N ready”를 타임아웃까지 기다리고, 놓치면 N−1 프레임을 다시 씁니다. B의 프레임 상한과 수직동기는 끕니다.</li>
+    <li><b>카메라.</b> B는 렌더 프레임마다 보간된 위치·시점·자세·접지 여부와 뷰 행렬(시점 흔들림 포함), 투영과 FOV를 보냅니다. A는 플레이어 자신의 이동을 끄고, 플레이어와 충돌 캡슐을 그 위치로 옮기며, 카메라를 1인칭으로 고정해 B의 행렬로 덮어씁니다. 세로 FOV는 가로 FOV로 바꾸고, A 캐릭터의 몸과 팔은 숨깁니다.</li>
+    <li><b>입력.</b> A의 입력 장치 관리자에서 원시 입력을 읽어 A의 조작으로는 보내지 않고, Mixin을 통해 B의 키보드·마우스 핸들러로 넘깁니다. B 화면(인벤토리 등)이 열리면 커서를 보이고, A 메뉴가 열리면 입력을 A로 돌리고 B를 멈춥니다.</li>
+    <li><b>렌더와 합성.</b> B는 A의 해상도로 world·hand·GUI 세 레이어를 오프스크린에 그립니다. world 레이어는 A의 깊이 버퍼로 깊이 검사를 하므로 A의 벽이 B의 블록을 가립니다. hand는 A 장면 다음에, GUI는 맨 위에 올립니다. 전달은 OpenGL이면 WGL_NV_DX_interop2로 D3D11 공유 텍스처에, Vulkan이면 VK_KHR_external_memory_win32와 공유 펜스로 합니다.</li>
+    <li><b>세계 공유.</b> A는 플레이어 주변의 충돌 형상(Havok 레이캐스트)과 NPC 위치를 보내고, B는 이를 자기 충돌 질의에 넣어 B의 물리 엔진을 수정 없이 A의 지형 위에서 돌립니다. NPC는 B 안에서 보이지 않는 프록시 엔티티가 되고, B에서 맞힌 타격은 A의 피해 처리 경로로 돌아갑니다.</li>
+    <li><b>좌표 변환.</b> 두 게임은 단위와 축이 다릅니다. SkyCraft에서는 1블록이 스카이림 70유닛이고, 스카이림은 Z축이, 마인크래프트는 Y축이 위쪽입니다. 가이드는 이 변환을 먼저 문서로 적고 단위 테스트하라고 권합니다.</li>
+    <li><b>저장.</b> A의 세이브 안에 save id를 넣어 두고, A가 저장하면 B도 그 id로 자기 상태를 스냅숏합니다. 그래서 불러올 때 두 게임이 함께 되감깁니다.</li>
+  </ol>
+
+  <h3>오가는 메시지 (DESIGN.md 10절)</h3>
+  <div class="msgs">
+    <div>
+      <h4>A(호스트) → B(게임플레이)</h4>
+      <ul>
+        <li><code>Hello / Heartbeat</code></li><li><code>WorldContext</code></li><li><code>CollisionSection</code></li><li><code>CollisionEvict</code></li><li><code>ActorUpsert</code></li><li><code>ActorRemove</code></li><li><code>Input</code></li><li><code>PlayerHurt</code></li><li><code>BeginFrame</code></li><li><code>SaveRequest / LoadRequest</code></li>
+      </ul>
+    </div>
+    <div>
+      <h4>B(게임플레이) → A(호스트)</h4>
+      <ul>
+        <li><code>PlayerState</code></li><li><code>HitActor</code></li><li><code>UseTarget</code></li><li><code>BlockChange</code></li><li><code>FrameReady</code></li><li><code>MenuState</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>같은 뼈대, 다른 주입 방식</h3>
+  <div class="tbl wide">
+    <table>
+      <thead><tr><th>프로젝트</th><th>게임 A (호스트)</th><th>게임 B</th><th>호스트에 코드를 넣는 방법</th><th>특징</th></tr></thead>
+      <tbody>
+        <tr><td>SkyCraft</td><td>스카이림</td><td>마인크래프트</td><td>SKSE 플러그인 (C++, CommonLibSSE-NG, Address Library)</td><td>원형. 마인크래프트가 플레이어 위치·물리의 권한. 공유 메모리 + named event + GPU 공유 텍스처</td></tr>
+        <tr><td>EldenCraft</td><td>엘든링</td><td>마인크래프트 Java</td><td>me3가 Rust DLL 두 개(<code>eldencraft_native.dll</code>, <code>eldencraft_core.dll</code>)와 ReShade 6.8.0(<code>ReShade64.asi</code>, D3D12 합성 애드온)을 로드</td><td>권한이 반대: 엘든링이 이동·충돌·HP를 갖고 자세·입력·체력·카메라를 보냄. 마인크래프트는 블록·몹·피해와 공유 GPU 텍스처(world · avatar · HUD)를 돌려줌. 실행 파일 2.7.1.0 전용, 오프라인 싱글</td></tr>
+        <tr><td>minecraft-crossover-bridge</td><td>엘든링 (Mac, CrossOver)</td><td>마인크래프트</td><td>dinput8.dll 프록시가 교체 가능한 코어를 로드, Wine이 공유 파일을 매핑</td><td>게임 자체 스케줄러의 태스크에서 카메라를 덮어씀. Present 시점에 픽셀 단위 깊이 검사. “주소마다 기대 바이트(서명)를 확인한 뒤 사용”</td></tr>
+        <tr><td>ArkWeb</td><td>스파이더맨 리마스터</td><td>배트맨: 아캄 나이트</td><td>winmm.dll · dinput8.dll 프록시</td><td>D3D12 화면 캡처를 D3D11 호스트에 그림. 배트맨이 숨은 꼭두각시</td></tr>
+        <tr><td>GTA V × 마인크래프트</td><td>GTA V</td><td>마인크래프트</td><td>ScriptHookV ASI + ReShade 애드온</td><td>127.0.0.1 WebSocket과 공유 메모리를 함께 사용</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="prose">
+    <p><b>마인크래프트가 단골인 이유.</b> 가이드는 게임 B의 조건을 두 가지로 봅니다. 게임 안에 모드를 넣을 수 있어야 하고(Fabric), 자기 물리를 다른 게임의 지형에 대고 돌릴 수 있어야 합니다(통합 서버). 마인크래프트는 둘 다 됩니다. 그래서 참고 프로젝트는 전부 ‘로더가 있는 네이티브 호스트 + Java나 .NET 게임플레이 게임’ 조합입니다.</p>
+  </div>
+  <p class="src">근거 · github.com/chasmlol/SkyCraft docs/DESIGN.md · AI Game Modding Guides 02·09장 · github.com/justbustin/minecraft-crossover-bridge · github.com/luki-1/ArkWeb · nexusmods.com/eldenring/mods/11259</p>
+</section>
+
+<section id="build">
+  <p class="sec-no">05</p>
+  <h2 class="sec">AI 에이전트와 만드는 순서</h2>
+  <div class="prose"><p>Decrypt는 이런 모드가 점점 Claude 기반 에이전트로 만들어진다고 보도했고, 실제 저장소들이 그것을 보여 줍니다. SkyCraft 커밋 7개와 ArkWeb 커밋 4개에는 모두 “Co-Authored-By: Claude Opus 5.5”가 붙어 있고, SkyCraft를 바탕으로 한 Rustify는 “Claude가 코드 대부분을 썼다”고 밝힙니다. 반면 EldenCraft는 페이지와 저장소에 AI나 RE 도구 언급이 없고 커밋 19개에도 AI 표시가 없습니다. 표시가 없다고 해서 쓰지 않았다는 증거는 아닙니다. 아래는 가이드 9장의 제작 순서를 사람·에이전트·게임의 역할로 나눠 그린 것입니다.</p></div>
+  <figure>
+    <div class="fig-scroll">
+      <svg class="dg min-build" viewBox="0 0 1120 872" role="img" aria-label="AI 에이전트로 패스스루 모드를 만드는 순서. 사람이 게임 조합을 고르고 호스트에 로더가 있는지 판단한다. 없으면 엔진 리버스 엔지니어링부터 해야 한다. 있으면 사람이 시작 프롬프트를 주고, 에이전트가 코드 변경 없이 리콘 보고를 한 뒤 DESIGN.md를 쓰고, 로그 한 줄과 공유 메모리 핸드셰이크를 만든다. 이어 값 하나를 보내고 두 게임을 동시에 실행하면 사람이 걸어 보며 두 로그를 대조한다. 에이전트가 되돌려 보내기와 실패 대비를 만들고, 사람의 플레이테스트와 에이전트의 기능 추가를 반복한 뒤 성능과 세이브를 맞추고 사람이 코드만 공개한다.">
+        <defs>
+          <marker id="b-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-ink" d="M0,0L10,5L0,10z"/></marker>
+          <marker id="b-unk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-unk" d="M0,0L10,5L0,10z"/></marker>
+          <marker id="b-n" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path class="mk-note" d="M0,0L10,5L0,10z"/></marker>
+        </defs>
+        <g class="lane-sep">
+          <line x1="300" y1="0" x2="300" y2="872"/>
+          <line x1="800" y1="0" x2="800" y2="872"/>
+        </g>
+        <text class="lane-t" x="150" y="24">사람</text><text class="lane-s" x="150" y="42">판단 · 프롬프트 · 플레이테스트</text>
+        <text class="lane-t" x="550" y="24">AI 에이전트</text><text class="lane-s" x="550" y="42">Claude Code 등 · 코드 작성</text>
+        <text class="lane-t" x="965" y="24">두 게임 · 실행 결과</text><text class="lane-s" x="965" y="42">게임 A + 게임 B</text>
+        <rect class="bar-h" x="20" y="50" width="260" height="3" rx="1.5"/>
+        <rect class="bar-ag" x="330" y="50" width="440" height="3" rx="1.5"/>
+        <rect class="bar-eng" x="826" y="50" width="278" height="3" rx="1.5"/>
+
+        <g class="h"><rect class="box" x="16" y="66" width="268" height="52" rx="6"/><text class="t1" x="28" y="87">게임 조합 고르기</text><text class="t2" x="28" y="105">둘 다 싱글·오프라인 · 둘 다 소유</text></g>
+        <g class="h"><polygon class="box" points="150,140 260,170 150,200 40,170"/><text class="t1 mid" x="150" y="174.5">호스트에 로더가 있나?</text></g>
+        <g class="warn"><rect class="box" x="330" y="146" width="440" height="48" rx="6"/><text class="t1" x="342" y="166">없다면 엔진 리버스 엔지니어링부터</text><text class="t2" x="342" y="184">디컴파일 · 주소 탐색이 먼저라 난도가 크게 오른다</text></g>
+        <g class="note"><rect class="box" x="826" y="126" width="278" height="130" rx="6"/><text class="t1" x="838" y="147">에이전트가 RE를 할 때 (사례)</text><text class="t2" x="838" y="166">Ghidra 설치 · 프로세서 모듈 선택</text><text class="t2" x="838" y="184">pefile · capstone 스크립트로 클래스</text><text class="t2" x="838" y="201">16,242개 · vtable 16,398개 덤프</text><text class="t2" x="838" y="218">(ArkWeb, 게임 실행 없이)</text><text class="t2" x="838" y="236">주소마다 기대 바이트 확인 후 사용</text></g>
+
+        <g class="h"><rect class="box" x="16" y="226" width="268" height="68" rx="6"/><text class="t1" x="28" y="247">시작 프롬프트</text><text class="t2" x="28" y="264">“SkyCraft를 읽고 같은 구조로.</text><text class="t2" x="28" y="281">코드는 아직 바꾸지 마”</text></g>
+        <g class="ag"><rect class="box" x="330" y="234" width="440" height="52" rx="6"/><text class="t1" x="342" y="255">리콘 보고 (코드 변경 없음)</text><text class="t2" x="342" y="273">로더 · API · 온라인/안티치트 여부 · 가장 작은 첫 단계</text></g>
+        <g class="ag"><rect class="box" x="330" y="306" width="440" height="52" rx="6"/><text class="t1" x="342" y="327">docs/DESIGN.md 작성</text><text class="t2" x="342" y="345">두 반쪽 · 넘어가는 메시지 · 어느 쪽이 권한 · 만드는 순서</text></g>
+        <g class="ag"><rect class="box" x="330" y="378" width="440" height="52" rx="6"/><text class="t1" x="342" y="399">로그 한 줄 → 공유 메모리 핸드셰이크</text><text class="t2" x="342" y="417">헤더의 magic · 프로토콜 버전 · 두 PID 확인</text></g>
+        <g class="eng"><rect class="box" x="826" y="378" width="278" height="52" rx="6"/><text class="t1" x="838" y="399">플러그인 로드 로그</text><text class="t2" x="838" y="417">양쪽이 같은 버전을 읽음</text></g>
+        <g class="ag"><rect class="box" x="330" y="450" width="440" height="52" rx="6"/><text class="t1" x="342" y="471">값 하나 보내기</text><text class="t2" x="342" y="489">B → A 플레이어 위치, 양쪽에 같은 프레임 번호로 로그</text></g>
+        <g class="eng"><rect class="box" x="826" y="450" width="278" height="52" rx="6"/><text class="t1" x="838" y="471">두 게임 동시 실행</text><text class="t2" x="838" y="489">걸으면 꼭두각시가 따라옴</text></g>
+        <g class="h"><rect class="box" x="16" y="522" width="268" height="52" rx="6"/><text class="t1" x="28" y="543">걸어 보고 두 로그 대조</text><text class="t2" x="28" y="561">숫자가 같은지 확인</text></g>
+        <g class="ag"><rect class="box" x="330" y="594" width="440" height="52" rx="6"/><text class="t1" x="342" y="615">되돌려 보내기 · 실패 대비</text><text class="t2" x="342" y="633">A → B 충돌 · NPC · 하트비트로 상대 종료 감지</text></g>
+        <g class="h"><rect class="box" x="16" y="666" width="268" height="52" rx="6"/><text class="t1" x="28" y="687">플레이테스트 · 로그 붙여넣기</text><text class="t2" x="28" y="705">무엇이 일어났는지 정확히 설명</text></g>
+        <g class="ag"><rect class="box" x="330" y="666" width="440" height="52" rx="6"/><text class="t1" x="342" y="687">기능을 하나씩 추가하고 커밋</text><text class="t2" x="342" y="705">블록 → 전투 → 인벤토리 → UI</text></g>
+        <g class="ag"><rect class="box" x="330" y="738" width="440" height="52" rx="6"/><text class="t1" x="342" y="759">성능 · 세이브 맞추기</text><text class="t2" x="342" y="777">숨긴 창 표시 생략(25→60fps) · 힙 상한 · save id로 함께 저장</text></g>
+        <g class="h"><rect class="box" x="16" y="808" width="268" height="52" rx="6"/><text class="t1" x="28" y="829">공개</text><text class="t2" x="28" y="847">코드만, 게임 파일 없음 · 테스트한 버전 명시</text></g>
+
+        <path class="ar" d="M150,118V139" marker-end="url(#b-a)"/>
+        <path class="ar unk" d="M260,170H329" marker-end="url(#b-unk)"/>
+        <text class="lbl unk mid" x="295" y="164">아니오</text>
+        <path class="ar note" d="M770,170H825" marker-end="url(#b-n)"/>
+        <path class="ar" d="M150,200V225" marker-end="url(#b-a)"/>
+        <text class="lbl" x="158" y="216">예</text>
+        <path class="ar" d="M284,260H329" marker-end="url(#b-a)"/>
+        <path class="ar" d="M550,286V305" marker-end="url(#b-a)"/>
+        <path class="ar" d="M550,358V377" marker-end="url(#b-a)"/>
+        <path class="ar" d="M770,404H825" marker-end="url(#b-a)"/>
+        <path class="ar" d="M550,430V449" marker-end="url(#b-a)"/>
+        <path class="ar" d="M770,476H825" marker-end="url(#b-a)"/>
+        <path class="ar" d="M965,502V548H287" marker-end="url(#b-a)"/>
+        <text class="lbl mid" x="550" y="542">사람이 직접 실행해 봄</text>
+        <path class="ar" d="M150,574V620H329" marker-end="url(#b-a)"/>
+        <text class="lbl" x="158" y="596">맞으면 다음</text>
+        <path class="ar" d="M550,646V665" marker-end="url(#b-a)"/>
+        <path class="ar" d="M284,684H329" marker-end="url(#b-a)"/>
+        <text class="lbl mid" x="307" y="678">증상</text>
+        <path class="ar" d="M330,704H287" marker-end="url(#b-a)"/>
+        <text class="lbl mid" x="307" y="722">새 빌드</text>
+        <path class="ar" d="M770,682H786V702H773" marker-end="url(#b-a)"/>
+        <text class="lbl" x="779" y="722">반복</text>
+        <path class="ar" d="M550,718V737" marker-end="url(#b-a)"/>
+        <path class="ar" d="M550,790V834H287" marker-end="url(#b-a)"/>
+        <text class="lbl mid" x="420" y="828">완성</text>
+      </svg>
+    </div>
+    <figcaption><b>그림 4. 사람과 에이전트의 분업.</b> 가이드의 표현대로 “에이전트는 게임을 보거나 느낄 수 없어서” 실행과 판단은 사람이 합니다. 가이드는 처음 세 단계(로그 한 줄, 핸드셰이크, 값 하나)를 두고 “이것이 요령의 전부”라고 말합니다.</figcaption>
+  </figure>
+
+  <div class="split">
+    <div>
+      <h3>에이전트가 맡은 일</h3>
+      <ul>
+        <li><b>설계와 양쪽 코드.</b> 호스트 플러그인(C++·Rust), 게임 B 모드(Java), 공유 메모리 프로토콜, 합성 셰이더까지 씁니다. 가이드: “SkyCraft 프로젝트를 가리키며 같은 것을 원한다고 하면 에이전트가 나머지를 알아낸다.”</li>
+        <li><b>필요할 때 리버스 엔지니어링.</b> “올바른 도구로 디컴파일하라”고 하자 에이전트가 맞는 프로세서 모듈과 함께 Ghidra를 설치해 돌렸다는 사례가 있습니다. ArkWeb에서는 게임을 한 번도 실행하지 않고 에이전트가 쓴 pefile·capstone 스크립트로 클래스 16,242개, vtable 16,398개, 문자열 참조와 호출 지점을 덤프해 Havok 충돌 계층을 후킹 지점으로 찾았습니다.</li>
+        <li><b>주소 검증.</b> 엘든링 Mac 브리지는 “주소와 구조는 이 빌드를 리버스 엔지니어링해 찾았고 실행 중에 검증했다”고 적고, 쓰기 전에 각 주소의 바이트를 대조합니다.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>사람이 맡은 일</h3>
+      <ul>
+        <li><b>조합과 범위 결정.</b> 둘 다 오프라인 게임인지, 호스트에 로더가 있는지 확인합니다. 가이드는 온라인 게임을 “범위 밖”으로 못 박습니다.</li>
+        <li><b>실행과 관찰.</b> 두 게임을 띄워 걸어 보고, 무엇이 일어났는지 정확히 말하고, 양쪽 로그를 붙여 넣습니다.</li>
+        <li><b>막혔을 때 정리.</b> 같은 프롬프트를 반복하지 말고 STATUS.md를 써서 새 대화로 넘기라고 권합니다. 가장 시간을 잡아먹는 것은 버전 변화, 좌표계(단위·위쪽 축·원점), 두 세이브 시스템, GPU와 프레임 클록 다툼 네 가지입니다.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="src">근거 · decrypt.co/380407 · AI Game Modding Guides 02·04·09장 · SkyCraft·ArkWeb 커밋 기록 · minecraft-crossover-bridge README</p>
+</section>
+
+<section id="re">
+  <p class="sec-no">06</p>
+  <h2 class="sec">리버스 엔지니어링과 REA</h2>
+  <div class="prose"><p>두 방식 모두 밑바닥에는 리버스 엔지니어링이 있습니다. 다만 대부분은 커뮤니티가 수년 전에 해 둔 것이고, 2026년의 매시업에서 새로 하는 RE는 ‘호스트 게임의 어디에 코드를 걸지’ 찾는 일에 집중됩니다.</p></div>
+  <div class="tbl wide">
+    <table>
+      <thead><tr><th>층위</th><th>무엇을 알아내나</th><th>누가 · 무엇으로</th></tr></thead>
+      <tbody>
+        <tr><td>파일 형식</td><td>FLVER·BND4·DCX·TPF·MATBIN·HKX·TAE (FromSoftware) / .archive·CR2W (REDengine)</td><td>커뮤니티가 해독해 도구로 정리: SoulsFormats, BinderKeys(엘든링 해시 경로 131,031개를 모두 복원), Paramdex, WolvenKit. ividyon의 엘든링 모델링 문서는 Souls 계열에 공식 모딩 지원이 없어 “모든 도구를 리버스 엔지니어들이 맨손으로 긁어모았다”고 설명합니다.</td></tr>
+        <tr><td>실행 중 구조</td><td>플레이어·카메라 구조체, 렌더 함수, 피해 처리 함수</td><td>Ghidra, IDA, x64dbg, Cheat Engine, ReClass. 사이버펑크는 RTTI 덤프(RED4ext)로 클래스 구조를 얻습니다. 매시업에서는 에이전트가 직접 쓴 pefile·capstone 스크립트와 Rust의 pelite·iced-x86도 쓰였습니다.</td></tr>
+        <tr><td>버전 대응</td><td>패치마다 바뀌는 주소</td><td>바이트 패턴(AOB) 서명 검색, 스카이림의 Address Library, 주소마다 기대 바이트 확인. 그래도 대부분 특정 게임 버전에 고정됩니다.</td></tr>
+        <tr><td>코드 주입</td><td>게임 안에서 우리 코드를 실행</td><td>로더(SKSE, me3, ScriptHookV, UE4SS, BepInEx), DLL 프록시(dinput8, winmm), 후킹(MinHook의 트램펄린, 14바이트 절대 점프), ReShade 애드온, 사이버펑크는 redscript의 @wrapMethod·@replaceMethod</td></tr>
+        <tr><td>렌더 합성</td><td>다른 게임의 픽셀을 깊이에 맞게 끼워 넣기</td><td>RenderDoc으로 깊이 형식과 후킹 지점 확인, GPU 공유 텍스처, Present 후킹</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="verdict">
+    <h3>그래서 REA를 썼나</h3>
+    <div class="grid">
+      <div>
+        <span class="lab no">확인되지 않음</span>
+        <h4>매시업에 쓰였다는 기록은 없다</h4>
+        <p>가이드 두 판(10월 3일, 6일), universal-modder, 매시업 저장소 12곳의 문서, Nexus 설명문, Decrypt 기사 어디에도 REA(rea-agents)는 나오지 않습니다. SkyCraft·EldenCraft·Mac 브리지·Minecraft-Ring·ArkWeb은 소스 전체를 검색했습니다. 한 기사가 REA를 매시업 사례 옆에 소개하지만, 그것이 쓰였다고 하지는 않습니다.</p>
+      </div>
+      <div>
+        <span class="lab ag">실제로 쓰인 것</span>
+        <h4>코딩 에이전트 + 범용 RE 도구</h4>
+        <p>Claude Code(Opus 5.5), Ghidra, ILSpy, 에이전트가 쓴 Python 스크립트. 10월 3일판 가이드는 “MCP 서버는 필요 없다”고 했다가 6일판에서 “디컴파일러를 MCP 서버로 조종하는 것이 작업 방식을 바꾼다”며 ghidra-mcp와 ida-mcp를 연결했습니다. universal-modder는 GhidraMCP, ida-pro-mcp, x64dbg·Cheat Engine·Frida·RenderDoc용 MCP를 목록에 올려 둡니다.</p>
+      </div>
+      <div>
+        <span class="lab ok">REA가 들어갈 자리 (추론)</span>
+        <h4>호스트 실행 파일의 정적 리콘</h4>
+        <p>패스스루 제작에서 REA가 맞는 곳은 ‘로더가 없거나 후킹 지점을 찾아야 할 때’의 정적 분석입니다. Ghidra·IDA로 함수·문자열·참조를 찾고, 결과를 증거 ID로 남겨 패치 뒤 다시 확인할 수 있습니다. ArkWeb에서 에이전트가 직접 짠 스크립트가 하던 일입니다. REA는 다른 게임 RE 저장소(예: rea-agents 6.4.0과 ida-pro-mcp를 함께 고정한 저장소)에서는 쓰인 흔적이 있습니다.</p>
+      </div>
+    </div>
+    <p class="src" style="margin-top:14px">한계 · REA에는 Frida 연동 도구도 있지만 주입 플러그인이나 렌더 합성 코드를 만들어 주지는 않습니다. 그 코드는 에이전트가 직접 씁니다. REA의 DISCLAIMER는 안티치트 우회와 게임 치트 개발을 지원하지 않는다고 밝힙니다. 자세한 동작은 <a href="rea-llm-reverse-engineering.html">REA × LLM 분석 문서</a>에 있습니다.</p>
+  </div>
+</section>
+
+<section id="fake">
+  <p class="sec-no">07</p>
+  <h2 class="sec">방식 C: AI 영상 구별법</h2>
+  <div class="prose">
+    <p>실제로 조작할 수 없는 ‘매시업’ 영상도 돕니다. 짧은 텍스트→영상 모델(Veo, Kling, Sora), 실시간으로 화면 스타일을 바꾸는 모델(Decart의 Lucy Restyle 2, 2025년의 Mirage), 몇 분 동안 일관된 세계를 만드는 월드 모델(Genie 3, Oasis 3 미리보기)로 만들 수 있습니다. 다만 특정 바이럴 클립이 이 도구로 만들어졌다고 밝힌 출처는 찾지 못했습니다. 언론의 ‘AI slop’은 AI가 만든 영상과 AI로 코딩한 모드를 섞어 부르기도 하니, 기사 표현만으로 판단하지 마세요.</p>
+  </div>
+  <div class="split">
+    <div>
+      <h3>확인해 볼 것</h3>
+      <ol>
+        <li><b>배포물이 있나.</b> 실제 Releases가 있는 저장소, 다운로드 가능한 모드 페이지, 제작자의 다른 저장소.</li>
+        <li><b>초기 보도의 단서.</b> 첫 기사들이 어떤 유보(hedge)를 달았는지 읽습니다.</li>
+        <li><b>길이와 메타데이터.</b> 생성 클립은 보통 3–10초입니다. 워터마크와 C2PA 메타데이터를 봅니다.</li>
+        <li><b>인터페이스.</b> “실제 게임 UI는 지루할 만큼 일정하고, 생성된 UI는 흐트러진다.” 체력바·미니맵·글자가 프레임마다 바뀌면 의심합니다.</li>
+        <li><b>물리.</b> 접지·충돌·그림자가 어긋나는 장면.</li>
+      </ol>
+    </div>
+    <div>
+      <h3>가장 흔한 경우</h3>
+      <ul>
+        <li>Held Games의 결론은 “가장 흔한 것은 진짜 영상에 거짓 주장이 붙은 경우”입니다. 영상은 진짜인데 ‘공개 예정’ ‘누구나 가능’이 사실이 아닌 식입니다.</li>
+        <li>‘Minecraft in Elden Ring’ 클립처럼, 한 매체가 가짜라 불렀지만 공개된 같은 구조의 코드가 있어 기술적으로 가능한 경우도 있습니다. 확인되지 않은 것과 가짜로 확인된 것은 다릅니다.</li>
+        <li>‘작동한다’는 저장소가 실행 파일만 주고 소스가 없거나, 아래의 미끼 패턴을 보이면 그 자체가 위험 신호입니다.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="src">근거 · heldgames.com/guides/is-that-viral-mod-video-real · gamesradar.com(10-06 기사) · Decart 문서 · Genie 3 발표</p>
+</section>
+
+<section id="risk">
+  <p class="sec-no">08</p>
+  <h2 class="sec">위험과 규칙</h2>
+  <div class="alert">
+    <p><b>미끼 저장소 주의.</b> “Overwatch × Elden Ring ✅ Working”을 내건 GitHub 저장소 두 곳(TileTrackWarehouse/Passthrough-Mod-Forge, TerminusBoulder/Universal-Game-Mashup-Studio)은 계정을 만든 지 2분 만에 저장소를 만들었고, README를 몇 분마다 자동으로 고치며, 관리자 PowerShell에서 원격 스크립트를 내려받아 바로 실행하는 명령(<code>iex (iwr "http://…")</code>)을 쓰라고 합니다. 내려받는 파일은 암호 걸린 93MB zip이고, “실시간 보호를 잠시 끄라”고 안내합니다. 악성코드 유포에 흔한 패턴이므로 실행하지 마세요. 페이로드 자체는 내려받거나 분석하지 않았습니다.</p>
+  </div>
+  <div class="split">
+    <div>
+      <h3>기술적 위험</h3>
+      <ul>
+        <li><b>안티치트와 온라인.</b> 엘든링은 Easy Anti-Cheat가 꺼져 있으면 온라인이 막히고, 모드는 오프라인에서만 씁니다. me3는 기본으로 공식 매치메이킹 연결을 막고, 별도 세이브 파일로 “세이브 손상과 멀티플레이 차단을 피하라”고 권합니다. 보호된 게임 옆에서 디버거를 켜는 것만으로 안티치트가 반응할 수 있습니다. 오버워치 같은 온라인 게임은 모든 가이드가 범위 밖으로 둡니다.</li>
+        <li><b>버전 고정.</b> 주소와 구조가 빌드마다 달라 대부분 한 버전에만 맞습니다(EldenCraft는 실행 파일 2.7.1.0만 받음). 게임이 패치되면 깨집니다.</li>
+        <li><b>성능.</b> 게임 두 개와 채널이 함께 돕니다. SkyCraft는 JVM 힙을 약 3GB로 잡고, OWCraft는 숨긴 창의 화면 표시를 생략해 25fps를 60fps로 올렸습니다. 프레임 동기가 없으면 끊깁니다.</li>
+        <li><b>완성도.</b> 제작자들 스스로 “엉성하지만 작동”이라 말하고, Destructoid는 “간신히 플레이 가능”이라 평했습니다.</li>
+        <li><b>에이전트와 브리지 보안.</b> 가이드는 PC 전체 권한을 가진 에이전트의 위험을 경고합니다. 브리지의 공유 메모리는 같은 PC의 다른 프로세스도 읽을 수 있고, 디버거·MCP 서버는 127.0.0.1에만 열어 두라고 권합니다.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>권리와 약관</h3>
+      <ul>
+        <li><b>두 게임을 모두 소유.</b> 패스스루는 플레이어마다 두 게임이 필요하고, 저장소에는 코드와 설치 스크립트만 올립니다. 게임 파일은 절대 넣지 않습니다.</li>
+        <li><b>블리자드.</b> EULA 1.C.i(2024-03-21 개정)는 플랫폼의 리버스 엔지니어링, 디컴파일, 파생물 제작을 금지합니다. 2016년에는 오버워치 추출 에셋을 쓴 SFM 제작자들이 DMCA 삭제 요청을 받았다고 보고했습니다.</li>
+        <li><b>Nexus.</b> 권리자 허락 없이 게임 파일이나 이미지 같은 저작권 콘텐츠를 올리는 것을 금지합니다. 오버워치 모델 이식이 남아 있는 것은 단속하지 않아서일 뿐입니다(추론).</li>
+        <li><b>CD Projekt Red.</b> 팬 콘텐츠 가이드라인은 EULA를 어기지 않는 한 모드를 허용하지만, CDPR 콘텐츠를 다른 게임에 쓰려면 미리 묻고, 다른 게임 제작자의 권리를 침해하지 말고, 유료로 막지 말라고 합니다.</li>
+        <li><b>퍼블리셔 반응.</b> 철권 7에 엘든링을 넣은 모드에 철권 디렉터는 “엄청 잘 만든 모드지만 제발 그만해 ㅋㅋ”라고 반응했습니다. Decrypt가 인용한 제작자의 말도 “DMCA 받을 때까지 기다려 봐”였습니다.</li>
+      </ul>
+    </div>
+  </div>
+  <p class="src">근거 · pcgamingwiki.com/wiki/Elden_Ring · github.com/garyttierney/me3 configuration-reference · AI Game Modding Guides 02·06·09장 · blizzard.com EULA · help.nexusmods.com/article/28 · cdprojektred.com/en/fan-content · pcgamer.com(엘든링 철권 모드)</p>
+</section>
+
+<section id="sources">
+  <p class="sec-no">09</p>
+  <h2 class="sec">출처</h2>
+  <ul class="sources">
+    <li class="g">기사 · 가이드</li>
+    <li><a href="https://decrypt.co/380407/ai-video-game-mod-mashups-are-taking-off-here-are-the-wackiest-examples">Decrypt, AI Video Game Mod Mashups Are Taking Off (2026-10-08)</a></li>
+    <li><a href="https://www.gamesradar.com/games/the-elder-scrolls/skyrim-modder-forgoes-trend-of-ai-powered-crossovers-brings-elden-rings-combat-to-the-rpg-himself-and-earns-rave-reviews-holy-peak/">GamesRadar, 스카이림 엘든링 전투 모드와 AI 크로스오버 유행</a></li>
+    <li><a href="https://github.com/LeiiLo/ai-game-modding-guides">AI Game Modding Guides (원본 저장소 삭제, 커밋 기록이 남은 사본)</a> · <a href="https://github.com/Freakmenn/ai-game-modding-guides">10월 3일 사본</a></li>
+    <li><a href="https://heldgames.com/guides/skycraft-minecraft-inside-skyrim">Held Games, SkyCraft 해설</a> · <a href="https://heldgames.com/guides/is-that-viral-mod-video-real">바이럴 모드 영상 진위 확인법</a></li>
+    <li class="g">패스스루 프로젝트</li>
+    <li><a href="https://github.com/chasmlol/SkyCraft">SkyCraft</a> (<a href="https://github.com/chasmlol/SkyCraft/blob/main/docs/DESIGN.md">DESIGN.md</a>)</li>
+    <li><a href="https://www.nexusmods.com/eldenring/mods/11259">EldenCraft (Nexus #11259)</a> · <a href="https://github.com/SocketByte/EldenCraft">EldenCraft 소스</a></li>
+    <li><a href="https://www.nexusmods.com/skyrimspecialedition/mods/194786">Rustify (SkyCraft 기반)</a> · <a href="https://github.com/Funny-Bones/ELDEN-RING-Playermodel-Rust">스카이림 엘든링 전투 컨트롤러</a></li>
+    <li><a href="https://github.com/justbustin/minecraft-crossover-bridge">minecraft-crossover-bridge (엘든링, Mac)</a></li>
+    <li><a href="https://github.com/luki-1/ArkWeb">ArkWeb (스파이더맨 × 아캄 나이트)</a></li>
+    <li><a href="https://github.com/rehan-remade/universal-modder">universal-modder</a></li>
+    <li class="g">엘든링 모딩</li>
+    <li><a href="https://soulsmodding.com/doku.php?id=tutorial:export-edit-and-import-models">Souls 모딩 위키, 모델 내보내기·편집·가져오기</a> · <a href="https://soulsmodding.com/doku.php?id=format:flver">FLVER 형식</a></li>
+    <li><a href="https://github.com/JKAnderson/Nuxe">Nuxe</a> · <a href="https://github.com/JKAnderson/BinderKeys">BinderKeys</a> · <a href="https://github.com/JKAnderson/SoulsFormats">SoulsFormats</a> · <a href="https://github.com/ividyon/WitchyBND">WitchyBND</a></li>
+    <li><a href="https://github.com/vawser/Smithbox">Smithbox</a> · <a href="https://github.com/asasasasasbc/FLVER_Editor">FLVER Editor</a> · <a href="https://github.com/Grimrukh/soulstruct-blender">Soulstruct for Blender</a> · <a href="https://github.com/Meowmaritus/DSAnimStudio">DSAnimStudio</a> · <a href="https://github.com/soulsmods/Paramdex">Paramdex</a></li>
+    <li><a href="https://github.com/garyttierney/me3/blob/main/docs/configuration-reference.md">me3 설정 문서</a> · <a href="https://github.com/techiew/EldenRingMods/blob/master/ModUtils.h">ModUtils.h (AOB 검색·후킹)</a> · <a href="https://github.com/TsudaKageyu/minhook">MinHook</a></li>
+    <li><a href="https://www.nexusmods.com/eldenring/mods/3522">Mercy from Overwatch (Nexus #3522)</a> · <a href="https://github.com/overtools/OWLib">OWLib / DataTool</a> · <a href="https://github.com/overtools/TACTLib">TACTLib</a></li>
+    <li class="g">사이버펑크 · 기타</li>
+    <li><a href="https://github.com/WolvenKit/WolvenKit">WolvenKit</a> · <a href="https://wiki.redmodding.org/cyberpunk-2077-modding/for-mod-creators-theory/3d-modelling/porting-3d-objects-to-cyberpunk">3D 객체 이식 문서</a> · <a href="https://wiki.redmodding.org/cyberpunk-2077-modding/for-mod-creators-theory/core-mods-explained">핵심 모드 설명</a> · <a href="https://github.com/WopsS/RED4ext.SDK">RED4ext.SDK</a></li>
+    <li><a href="https://www.nexusmods.com/cyberpunk2077/mods/7857">Diamond Sword</a> · <a href="https://www.nexusmods.com/cyberpunk2077/mods/12744">Minecraft Throwable Weapons</a> · <a href="https://www.nexusmods.com/cyberpunk2077/mods/15581">When Pigs Fly</a></li>
+    <li><a href="https://www.nexusmods.com/fallout4/mods/15660">Minecraft FO4 (폴아웃 4)</a> · <a href="https://www.curseforge.com/minecraft/mc-mods/minerunner-2077">Minerunner 2077</a></li>
+    <li class="g">규칙 · 약관</li>
+    <li><a href="https://www.pcgamingwiki.com/wiki/Elden_Ring">PCGamingWiki, Elden Ring (Easy Anti-Cheat)</a></li>
+    <li><a href="https://www.blizzard.com/en-us/legal/fba4d00f-c7e4-4883-b8b9-1b4500a402ea/blizzard-end-user-license-agreement">Blizzard 최종 사용자 라이선스 계약</a></li>
+    <li><a href="https://help.nexusmods.com/article/28-file-submission-guidelines">Nexus Mods 파일 업로드 지침</a> · <a href="https://www.cdprojektred.com/en/fan-content">CD Projekt Red 팬 콘텐츠 가이드라인</a></li>
+  </ul>
+</section>
+
+</main>
+
+<footer>
+  <div class="related"><b>관련 산출물</b><a href="rea-llm-reverse-engineering.html">REA와 LLM은 어떻게 리버스 엔지니어링을 하는가 (rea-llm-reverse-engineering.html)</a></div>
+  <p>조사일: 2026-10-16. 웹 문서와 저장소는 바뀌거나 사라질 수 있습니다. 원본 가이드 저장소(trevaintdead/ai-game-modding-guides)는 조사 시점에 이미 삭제돼 사본으로 확인했습니다.</p>
+  <p>이 문서는 구현 원리를 설명하기 위한 것입니다. 안티치트를 우회하거나 온라인 서비스에 개입하는 방법은 다루지 않으며, 모드 제작·배포 전에 각 게임의 약관과 권리를 확인하세요.</p>
+</footer>
+
+</div>
+</body>
+</html>
